@@ -1,1 +1,1 @@
-# covid_cfr_svi
+Association between county-leve COVID-19 disease severity and Social Vulnerability Index
