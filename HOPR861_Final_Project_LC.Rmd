@@ -1,0 +1,570 @@
+---
+title: "HOPR861 Final Project"
+author: Lokesh Chinthala
+output: html_notebook
+date : 12/13/2022
+
+---
+<center>
+# Association Between County's Social Vulnerability and severity of COVID-19 pandemic
+</center>
+<br>
+
+## Social Vulnerability
+Social Vulnerability defines the ability of a community with certain social conditions, such as high poverty, racial minority, access to transportation, crowded households, low literacy, etc., to prevent human suffering and financial loss in the event of a disaster. The disaster can be a natural disaster or a disease outbreak.
+
+## Social Vulnerability Index
+*   Social Vulnerability Index - [SVI](https://www.atsdr.cdc.gov/placeandhealth/project_snapshots/svitool_covid.html) was created as part of  Geospatial Research, Analysis, & Services Program (GRASP).
+*   SVI helps public health officials and emergency response planners identify and map the communities that will most likely need support before, during, and after a hazardous event.
+*   It indicates the relative vulnerability of every U.S. Census tract - subdivisions of counties.
+*   A county/census tract is ranked 16 social factors categorized into 4 themes -
+    -   Socioeconomic Status
+    -   Household Characteristics
+    -   Racial & Ethnic Minority Status
+    -   Housing Type & Transportation
+    
+## COVID-19 
+*   Coronavirus disease (COVID-19) is an infectious disease caused by the SARS-CoV-2 virus.
+*   It was declared a pandemic on March 11th 2020 by the WHO(World Health Organization).
+*   COVID at a glance in the U.S.
+    -   Cases - 99,241,649
+    -   Deaths - 1,080,472
+    
+### Research Question and Hypothesis
+
+RQ: *Does SVI impact the COVID-19 disease severity in a County?*
+
+Hypotheses:
+
++ Null Hypothesis 1: There is no relationship between COVID-19 case-fatality rate and social vulnerability index among the Counties in the U.S.
+
++ Alternative Hypothesis 1: There is a relationship between COVID-19 case-fatality rate and social vulnerability index among the Counties in the U.S.
+
+------
+
++ Null Hypothesis 2: There is no significant difference in group mean of Case-fatality rate among SVI groups.
+
++ Alternative Hypothesis 2: There is a significant difference in group mean of Case-fatality rate among SVI groups.
+
+------
+
+##### Load required packages
+```{r}
+# Load required packages
+suppressMessages(library(tidyverse))
+suppressMessages(library(datasets))
+suppressMessages(library(stringr))
+suppressMessages(library(ggplot2))
+suppressMessages(library(modelr))
+suppressMessages(library(skimr))
+suppressMessages(library(rcompanion))
+suppressMessages(library(moderndive))
+suppressMessages(library(ggpubr))
+
+# Supress Group_by warnings
+options(dplyr.summarise.inform = FALSE)
+
+# Set current working directory
+#setwd('/Users/LChintha/HOPR861/Final_Project')
+```
+
+
+##### Read SVI information
+```{r}
+## SVI Data
+
+svi_urlfile="https://raw.githubusercontent.com/lokeshchinthala/covid_cfr_svi/main/Data/US_COUNTY_SVI2020.csv"
+
+df_svi <- read_csv(url(svi_urlfile),
+                   show_col_types = FALSE,
+                   trim_ws = TRUE,
+                   col_names = TRUE,
+                   col_types = cols(STCNTY= 'd', FIPS = 'd'),
+                   na = '-999')
+
+# View Data
+head(df_svi)
+```
+## Urban-Rural Classification
+*   National Center for Health Statistics Urban-Rural Classification Scheme for counties 
+    -   categorized counties into one of six categories based on population size
+        -   large central metropolitan.
+        -   large fringe metropolitan.
+        -   medium metropolitan.
+        -   small metropolitan. 
+        -   micropolitan. 
+        -   noncore areas.
+*   For the current analysis, results were presented in three categories: 
+    -   large central metropolitan and large fringe metropolitan (large metropolitan).
+    -   medium and small metropolitan; and micropolitan.
+    -   noncore areas (nonmetropolitan).
+
+```{r}
+# Adding Urbanicity column
+df_svi_cn <- df_svi %>% 
+                mutate(URBANICITY = as.factor(case_when((E_TOTPOP >= 250000) ~ 'Large metropolitan', 
+                                              (E_TOTPOP >= 50000 & E_TOTPOP < 250000) ~ 'Small/Medium metropolitan', 
+                                              TRUE ~ 'Nonmetropolitan')), 
+                                              ordered('Nonmetropolitan', 'Small/Medium metropolitan', 'Large metropolitan'),
+                       POP_DENSITY = E_TOTPOP/AREA_SQMI) %>%
+                          filter(!is.na(F_TOTAL))
+
+# View Counties based on URBANICITY
+df_svi_cn %>%
+  group_by(URBANICITY) %>%
+    summarise(COUNTY_COUNT = n_distinct(FIPS))
+```
+
+## SVI ranking
+*   Census tracts were ranked for the entire United States against one another.
+*   Tract rankings are based on percentiles. Percentile ranking values range from 0 to 1, with higher values indicating greater vulnerability.
+*   For each tract, its percentile rank was generated among all tracts for - 
+    -   the 16 individual variables.
+    -   the four themes.
+    -   its overall position.
+
+## SVI dataset abbreviations
+*   ST_ABBR = State abbreviation
+*   COUNTY  = County Name
+*   FIPS    = County-level FIPS code
+*   EPL - Estimated Percentile percentage of a variable
+<br><font color='brown'>EPL columns are Percentrank on EP (Estimated Percentage) array; i.e., EPL_POV150 = PERCENTRANK.INC(EP_POV150 column array, EP_POV150 value of each county)</font>
+
+*   Sum of series for **Socioeconomic Status theme** (SPL_THEME1)
+    -   EPL_POV150 - Below 150% Poverty
+    -   EPL_UNEMP - Unemployed
+    -   EPL_HBURD - Housing Cost Burden
+    -   EPL_NOHSDP - No High School Diploma
+    -   EPL_UNINSUR - No Health Insurance
+<br>
+*   Sum of series for **Household Characteristics theme** (SPL_THEME2)
+    -   EPL_AGE65 - Aged 65 & Older
+    -   EPL_AGE17 - Aged 17 & Younger
+    -   EPL_DISABL - Civilian with a Disability
+    -   EPL_SNGPNT - Single-Parent Households
+    -   EPL_LIMENG - English Language Proficiency
+<br>  
+*   Sum of series for **Racial and Ethnic Minority Status theme** (SPL_THEME3)
+    -   EPL_MINRTY - Hispanic or Latino; Black and African American; American Indian and Alaska Native; 
+        Asian; Native Hawaiian and Other Pacific Islander; Two or More Races;
+        Other Races
+<br>    
+*   Sum of series for **Housing Type/Transportation theme** (SPL_THEME4)
+    -   EPL_MUNIT - Multi-Unit Structures
+    -   EPL_MOBILE - Mobile Homes
+    -   EPL_CROWD - Crowding
+    -   EPL_NOVEH - No Vehicle
+    -   EPL_GROUPQ - Group Quarters
+<br>
+*   Sum of series themes **SPL_THEMES**
+<br>
+*   PERCENT RANK OF SPL_THEMES
+    -   RPL_THEME1 - Percent Rank of Socioeconomic Status theme
+    -   RPL_THEME2 - Percent Rank of Household Characteristics theme
+    -   RPL_THEME3 - Percent Rank of Racial and Ethnic Minority Status theme
+    -   RPL_THEME4 - Percent Rank of Housing Type/Transportation theme
+    -   **Overall Rank - RPL_THEMES Percent Rank of all four themes combined - SVI Score**
+
+##### Select SVI Variables
+```{r}
+# SVI Data subset
+df_svi_sub <- df_svi_cn %>%
+                select(ST_ABBR, COUNTY, FIPS, URBANICITY, POP_DENSITY, E_TOTPOP, E_HH, 
+                       # Socioeconomic Status theme
+                       EPL_POV150, EPL_UNEMP, EPL_HBURD, EPL_NOHSDP, EPL_UNINSUR, SPL_THEME1, RPL_THEME1,
+                       # Household Characteristics theme
+                       EPL_AGE65, EPL_AGE17, EPL_DISABL, EPL_SNGPNT, EPL_LIMENG, SPL_THEME2, RPL_THEME2,
+                       # Racial and Ethnic Minority Status theme
+                       # Excluding F_MINRTY as it is the same as F_THEME3, 
+                       SPL_THEME3, RPL_THEME3,
+                       # Housing Type/Transportation theme
+                       EPL_MUNIT, EPL_MOBILE, EPL_CROWD, EPL_NOVEH, EPL_GROUPQ, SPL_THEME4, RPL_THEME4,
+                       # Themes total
+                       SPL_THEMES, RPL_THEMES
+                       ) %>% 
+                        distinct()
+
+# View data
+head(df_svi_sub)
+
+# Summary stats of SVI Data
+skim(df_svi_sub)
+```
+## COVID-19 data 
+
+#### COVID-19 Infections data
+The COVID-19 cases data was downloaded from [USAfacts.org](https://static.usafacts.org/public/data/covid-19/covid_confirmed_usafacts.csv?_ga=2.6965618.1929602572.1670315748-44481042.1670315748). This dataset provides County level cumulative COVID-19 cases reported on a daily basis from January 2020 to November 2022.
+```{r}
+# Covid 19 infections
+cs_urlfile="https://raw.githubusercontent.com/lokeshchinthala/covid_cfr_svi/main/Data/COVID_confirmed_usafacts.csv"
+
+df_C19_cs <- read_csv(url(cs_urlfile),
+                   show_col_types = FALSE,
+                   trim_ws = TRUE,
+                   col_names = TRUE)
+
+# View data
+head(df_C19_cs)
+```
+
+**COVID-19 cases data frame contains cumulative cases count. So, using the last column for the COVID19 cases count**
+```{r}
+# Since the data set contains cumulative count of cases, using the last column for COVID19 cases count.
+df_C19_cs_piv <- df_C19_cs %>%
+                    select(countyFIPS, 'County Name', 'State', 'StateFIPS', '2022-11-30') %>%
+                      rename(CASES_COUNT = '2022-11-30') %>%
+                        filter(countyFIPS!=0) %>%
+                          distinct()
+
+# View data
+head(df_C19_cs_piv)
+
+# Summary stats of COVID-19 infections Data
+skim(df_C19_cs_piv)
+```
+
+#### COVID-19 mortality data
+The COVID-19 mortality data was also downloaded from [USAfacts.org](https://static.usafacts.org/public/data/covid-19/covid_deaths_usafacts.csv?_ga=2.6965618.1929602572.1670315748-44481042.1670315748). This dataset provides County level cumulative COVID-19 deaths reported on a daily basis from January 2020 to December 2022. For this analysis, the data was considered from January 2020 to November 2022.
+```{r}
+# COVID-19 deaths
+cd_urlfile="https://raw.githubusercontent.com/lokeshchinthala/covid_cfr_svi/main/Data/covid_deaths_usafacts.csv"
+
+df_C19_deaths <- read_csv(url(cd_urlfile),
+                          show_col_types = FALSE,
+                          trim_ws = TRUE,
+                          col_names = TRUE)
+
+# View data
+head(df_C19_deaths)
+```
+
+**COVID-19 cases data frame contains cumulative cases count. So, using the last column for the COVID19 cases count**
+
+**Pivoting COVID-19 death data frame to calculate the mortality per month**
+```{r}
+# Create Pivoted death data frame
+df_C19_deaths_piv <- df_C19_deaths %>%
+                      select(countyFIPS, 'County Name', 'State', 'StateFIPS', '2022-11-30') %>%
+                        rename(DEATH_COUNT = '2022-11-30') %>%
+                          filter(countyFIPS!=0) %>%
+                            distinct()
+
+# View data
+head(df_C19_deaths_piv)
+
+# Summary stats of COVID-19 montality Data
+skim(df_C19_deaths_piv)
+```
+
+**Joining COVID-19 cases and mortality data frames to get a consolidated dataset with cases and deaths per County per month**
+```{r}
+# COVID-19 data set
+df_C19 <- df_C19_cs_piv %>%
+            inner_join(df_C19_deaths_piv, by = c('countyFIPS', 'County Name', 'State', 'StateFIPS'))
+
+# View data
+head(df_C19)
+
+# Summary stats of COVID-19 Data
+skim(df_C19)
+```
+
+## COVID-19 and SVI - PREVALENCE AND CASE-FATALITY
+*   The COVID-19 data set with both cases and mortality information is joined with SVI data using the County FIPS code, which is a unique identifier in both data sets.
+*   To calculate the COVID-19 disease burden **Prevalence** was calculated.
+        $$Prevalence=Total\ count\ of\ cases/Total\ population$$.
+*   To calculate the COVID-19 disease severity **Case-Fatality Rate (CFR)** was calculated.
+        $$CFR=Total\ count\ of\ COVID19\ Deaths/Total\ count\ of\ cases$$.
+
+```{r}
+# COVID-19 data set and SVI data set
+df_C19_svi <- df_C19 %>% 
+                # rename column
+                rename(COUNTY_FIPS = countyFIPS) %>%
+                  # CASE-FATALITY
+                  mutate(CASE_FATALITY_RATE = round((DEATH_COUNT/CASES_COUNT)*100, 2)) %>%
+                    # Join with SVI
+                      inner_join(df_svi_sub, by = c('COUNTY_FIPS' = 'FIPS')) %>% 
+                          mutate(COUNTY_FIPS = as.character(COUNTY_FIPS), 
+                            SVI_QUARTILE=as.factor(str_c("Q", as.character(ntile(RPL_THEMES,4))))) %>%
+                              # PREVALENCE
+                                mutate(PREVALENCE = CASES_COUNT/E_TOTPOP) %>%
+                                  filter(!is.na(CASE_FATALITY_RATE) & !is.na(RPL_THEMES) & !is.na(PREVALENCE)) %>%
+                                    select(COUNTY_FIPS, ST_ABBR, COUNTY, POP_DENSITY, URBANICITY, CASES_COUNT, DEATH_COUNT, 
+                                           PREVALENCE, CASE_FATALITY_RATE, E_TOTPOP, E_HH, EPL_POV150, 
+                                           EPL_UNEMP, EPL_HBURD, EPL_NOHSDP, EPL_UNINSUR, 
+                                           SPL_THEME1, RPL_THEME1, EPL_AGE65, EPL_AGE17, 
+                                           EPL_DISABL, EPL_SNGPNT, EPL_LIMENG, SPL_THEME2, 
+                                           RPL_THEME2, SPL_THEME3, RPL_THEME3, EPL_MUNIT, EPL_MOBILE, EPL_CROWD, 
+                                           EPL_NOVEH, EPL_GROUPQ, SPL_THEME4, RPL_THEME4, 
+                                           SPL_THEMES, RPL_THEMES, SVI_QUARTILE) %>%
+                                    # Distinct values
+                                    distinct()
+                          
+
+# View data
+head(df_C19_svi)
+```
+
+**Summary stats**
+```{r}
+# Summary statistics
+df_C19_svi %>%
+  skim()
+```
+
+
+## Exploratory Data Analysis (EDA) and Data Visualization
+
+*   The primary purpose of EDA is to obtain an understanding of data to develop research questions.
+*   EDA offers an understanding of data without formal modeling or hypothesis testing. 
+*   The derivation of patterns can illustrate stories with the data.
+
+RQ: *Does SVI impact the COVID-19 disease severity in a County?*
+
+
+#### Creating a bar Chart of the top 25 Counties with COVID-19 CFR
+```{r fig.width=6}
+# Create a bar plot
+df_C19_svi %>%
+  arrange(desc(CASE_FATALITY_RATE)) %>%
+    head(25) %>%
+      ggplot() +
+        geom_bar(mapping=aes(x=reorder(COUNTY, -CASE_FATALITY_RATE), y=CASE_FATALITY_RATE, fill = ntile(RPL_THEMES,4)), 
+                 position = position_dodge(width=0.9), stat="identity") +
+          labs(x = "County", y = "Case-fatality rate", fill = "SVI quartile",
+              title = "Top 25 counties with COVID-19 case-fatality rate") + 
+                theme(plot.title=element_text(hjust=0.5), 
+                      axis.text.x = element_text(size = 12, angle = 90, vjust = 0.5, hjust=1),
+                      axis.text.y = element_text(size = 12, angle = 0, vjust = 0.5, hjust=1),
+                      text = element_text(size = 12), 
+                      element_line(size = 0.5)) +
+                  scale_fill_gradient2(low="black", mid="grey", high="red")
+```
+
+
+
+**To find association between SVI and COVID-19 case-fatality rate i.e., to find severity of COVID19 pandemic**
+```{r fig.width=6}
+# Create a Scatter plot
+df_C19_svi %>%
+      ggplot()+
+        geom_point(mapping=aes(x=RPL_THEMES, y=CASE_FATALITY_RATE, color=URBANICITY), position = "jitter", size=2) + 
+          geom_smooth(mapping=aes(x=RPL_THEMES,y=CASE_FATALITY_RATE), method=lm)+
+            labs(x = "SVI score", y = "Case-fatality rate",
+                title = "SVI and COVID-19 disease burden by Urbanicity") +
+                  theme(plot.title=element_text(hjust=0.5), 
+                        axis.text.x = element_text(size = 12, angle = 0, vjust = 0.5, hjust=1),
+                        axis.text.y = element_text(size = 12, angle = 0, vjust = 0.5, hjust=1),
+                        text = element_text(size = 12), 
+                        element_line(size = 0.5))
+```
+
+
+
+#### Bar Chart of COVID-19 Prevalence and case-fatality rate by Urbanicity 
+```{r fig.width=6}
+# Create a bar plot
+df_C19_svi %>% 
+      ggplot() +
+        geom_bar(mapping=aes(x=reorder(ntile(RPL_THEMES,4), RPL_THEMES), y=PREVALENCE, fill = CASE_FATALITY_RATE), 
+                 position = position_dodge(width=0.9), stat="identity") +
+          facet_wrap(~URBANICITY, nrow = 3) +
+            labs(x = "SVI Score in Quartiles", y = "COVID-19 Prevalence per 10,000 population",
+                 fill = "Case-fatality rate",
+                title = "COVID-19 Prevalence and Case-fatality by Urabnicity") + 
+                  theme(plot.title=element_text(hjust=0.5), 
+                        axis.text.x = element_text(size = 12, angle = 0, vjust = 0.5, hjust=1),
+                        axis.text.y = element_text(size = 12, angle = 0, vjust = 0.5, hjust=1),
+                        text = element_text(size = 12), 
+                        element_line(size = 0.5)) +
+                    scale_fill_gradient2(low="black", mid="grey", high="red")
+```
+
+
+## Normality testing
+
+#### Normal Q-Q Plots
+```{r fig.width=6}
+
+# SVI
+SVI_QQ <- df_C19_svi %>% 
+                ggplot(aes(sample = RPL_THEMES)) +
+                  stat_qq() +
+                  stat_qq_line() + 
+                      labs(x = "Theoretical Quantiles", y = "Sample Quantiles",
+                          title = "SVI Normal Q-Q Plot") + 
+                            theme(plot.title=element_text(hjust=0.5), 
+                                  axis.text.x = element_text(size = 12, angle = 0, vjust = 0.5, hjust=1),
+                                  axis.text.y = element_text(size = 12, angle = 0, vjust = 0.5, hjust=1),
+                                  text = element_text(size = 12), 
+                                  element_line(size = 0.5))
+
+# CFR 
+CFR_QQ <- df_C19_svi %>% 
+                ggplot(aes(sample = CASE_FATALITY_RATE)) +
+                  stat_qq() +
+                  stat_qq_line() + 
+                      labs(x = "Theoretical Quantiles", y = "Sample Quantiles",
+                          title = "CFR Normal Q-Q Plot") + 
+                            theme(plot.title=element_text(hjust=0.5), 
+                                  axis.text.x = element_text(size = 12, angle = 0, vjust = 0.5, hjust=1),
+                                  axis.text.y = element_text(size = 12, angle = 0, vjust = 0.5, hjust=1),
+                                  text = element_text(size = 12), 
+                                  element_line(size = 0.5))
+
+
+# Transform CFR
+T_CFR_QQ <- df_C19_svi %>% 
+                #Transform CFR
+                mutate(T_CFR = sqrt(CASE_FATALITY_RATE)) %>%
+                  ggplot(aes(sample = T_CFR)) +
+                    stat_qq() +
+                    stat_qq_line() + 
+                        labs(x = "Theoretical Quantiles", y = "Sample Quantiles",
+                            title = "Transformed CFR Normal Q-Q Plot") + 
+                              theme(plot.title=element_text(hjust=0.5), 
+                                    axis.text.x = element_text(size = 12, angle = 0, vjust = 0.5, hjust=1),
+                                    axis.text.y = element_text(size = 12, angle = 0, vjust = 0.5, hjust=1),
+                                    text = element_text(size = 12), 
+                                    element_line(size = 0.5))
+
+ggarrange(SVI_QQ, CFR_QQ, T_CFR_QQ + rremove("x.text"), 
+          ncol = 3, nrow = 1)
+```
+
+#### Histogram with Normal Curve
+```{r fig.width=6}
+par(mfrow=c(1,3))
+
+# SVI
+plotNormalHistogram( df_C19_svi$RPL_THEMES, prob = FALSE,
+                      main = "SVI Normal Distribution overlay on Histogram",
+                      length = 1000 )
+
+# CFR 
+plotNormalHistogram( df_C19_svi$CASE_FATALITY_RATE, prob = FALSE,
+                      main = "CFR Normal Distribution overlay on Histogram",
+                      length = 1000 )
+
+# Transform CFR
+plotNormalHistogram( sqrt(df_C19_svi$CASE_FATALITY_RATE), prob = FALSE,
+                      main = "Transform CFR Normal Distribution overlay on Histogram",
+                      length = 1000 )
+```
+
+## Statistical Test
+
+Hypotheses:
+
++ Null Hypothesis 1: There is no relationship between COVID-19 case-fatality rate and social vulnerability index among the Counties in the U.S.
+
++ Alternative Hypothesis 1: There is a relationship between COVID-19 case-fatality rate and social vulnerability index among the Counties in the U.S.
+
+#### Correlation analysis
+```{r}
+# Calculating Correlation score.
+cor(df_C19_svi[, c('RPL_THEME1', 'RPL_THEME2', 'RPL_THEME3', 'RPL_THEME4', 'RPL_THEMES', 'PREVALENCE', 'CASE_FATALITY_RATE')])
+```
+**The correlation coefficient of SVI and case-fatality rate is 0.2401, which indicates that the relationship between case-fatality rate and SVI score is weakly positive.**
+
+
+#### Linear Regression
+```{r fig.width=6}
+# Create a Scatter plot
+df_C19_svi %>%
+      ggplot()+
+        geom_point(mapping=aes(x=RPL_THEMES, y=CASE_FATALITY_RATE), position = "jitter", size=2) + 
+          geom_smooth(mapping=aes(x=RPL_THEMES,y=CASE_FATALITY_RATE), method=lm)+
+            labs(x = "SVI score", y = "Case-fatality rate",
+                title = "SVI score and COVID-19 disease severity") +
+                  theme(plot.title=element_text(hjust=0.5), 
+                        axis.text.x = element_text(size = 12, angle = 0, vjust = 0.5, hjust=1),
+                        axis.text.y = element_text(size = 12, angle = 0, vjust = 0.5, hjust=1),
+                        text = element_text(size = 12), 
+                        element_line(size = 0.5))
+```
+
+
+### Unadjusted Regression analysis for the association between COVID-19 CFR and overall SVI of a county 
+```{r}
+# Create a linear model
+reg_model <- lm(CASE_FATALITY_RATE~RPL_THEMES, df_C19_svi)
+
+
+# Summary of regression analysis
+summary(reg_model)
+```
+
+**Interpretation**
+
+*   The output has two columns : one corresponding to the intercept coefficient $$b_0$$ and one corresponding to the slope coefficient b1 for the SVI score. The blue regression line in our figure above is - 
+            $$cfr=b_0+b_1svi\_score=1.13485+0.64288*svi\_score $$.
+
+<font color=brown>**From the regression line, it can be inferred that for every one unit increase in SVI score there is an associated increase of, an average of 0.64288 units of COVID-19 case-fatality rate.**</font> 
+
+*   The **R-squared** value will range between 0 and 1. A value of 1 indicates that the predictor variables can perfectly explain the variance in the outcome variable and a value of 0 indicates that the explanatory variables cannot explain the variance in the response variable. Here, the R-squared of the model turns out to be 0.05158, which means that **5.16% of the variation in the COVID-19 case-fatality rate** can be explained by the overall social vulnerability index score.
+
+*   The **residual standard error** is a measure of how well the model fits the data. It indicates the average amount that actual values of Y differ from the predictors. Here the residual error is 0.7964, which implies the actual case-fatality rates are 0.7964 units away from the regression line (predicted values).
+
+*   The **F-statistic and p-values** are used in Hypothesis testing. The null hypothesis is that there is no relationship between COVID-19 case-fatality rate and social vulnerability index among the Counties in the U.S. and the alternative hypothesis is that there is a relationship between COVID-19 case-fatality rate and social vulnerability index among the Counties in the U.S. From the model results, the F-statistic is very large with a value of 170.5 and the p-value is so small and it is nearly zero. Based on this information, we reject the null hypothesis in favor of the alternative hypothesis with a significance value of 0.05. In other words, there is a relationship between COVID-19 case-fatality rate and social vulnerability index among the Counties in the U.S.
+
+### Adjusted Regression analysis for the association between COVID-19 CFR and overall SVI of a county adjusted for population density
+```{r}
+# Create a linear model
+reg_pd_model <- lm(CASE_FATALITY_RATE~RPL_THEMES+POP_DENSITY, df_C19_svi)
+
+
+# Summary of regression analysis
+summary(reg_pd_model)
+```
+
+**Interpretation**
+
+*   The blue regression line in our figure above is - $$cfr=b_0+b_1svi\_score+b_2POP\_Denisty=1.137+0.6546*svi\_score-0.00003126*pop\_density$$.
+
+<font color=brown>**From the regression line, it can be inferred that, when comparing counties with same population density, the average predicted COVID-19 case-fatality rate increases in 0.6546 units for a unit increase in SVI score. Similarly, when comparing the counties with same SVI score, the COVID-19 case-fatality rate decreases in 0.00003126 units for a unit increase in the Population density.**</font>
+
+*   The **R-squared** value will range between 0 and 1. A value of 1 indicates that the predictor variables can perfectly explain the variance in the outcome variable and a value of 0 indicates that the explanatory variables cannot explain the variance in the response variable. Here, the adjusted R-squared of the model turns out to be 0.05563, which means that **5.56% of the variation in the COVID-19 case-fatality rate** can be explained by the overall social vulnerability index score and population density. The adjusted R-squared is considered because two cariates are used in the model.
+
+*   The **residual standard error** is a measure of how well the model fits the data. It indicates the average amount that actual values of Y differ from the predictors. Here the residual error is 0.7946, which implies the actual case-fatality rates are 0.7964 units away from the regression line (predicted values).
+
+*   The **F-statistic and p-values** are used in Hypothesis testing. The null hypothesis is that there is no relationship between COVID-19 case-fatality rate and social vulnerability index among the Counties in the U.S when adjusted for population density. and the alternative hypothesis is that there is a relationship between COVID-19 case-fatality rate and social vulnerability index among the Counties in the U.S when adjusted for population density. From the model results, the F-statistic is very large with a value of 93.39 and the p-value is so small and it is nearly zero. Based on this information, we reject the null hypothesis in favor of the alternative hypothesis with a significance value of 0.05. In other words, there is a relationship between COVID-19 case-fatality rate and social vulnerability index among the Counties in the U.S when adjusted for population density.
+
+
+--------
+
+## One-Way ANOVA model
+
+Hypotheses:
+
++ Null Hypothesis 2: There is no significant difference in group mean of Case-fatality rate among SVI groups.
+
++ Alternative Hypothesis 2: There is a significant difference in group mean of Case-fatality rate among SVI groups.
+
+* SVI_QUARTILE -
+  -   Q1 - lowest vulnerability
+  -   Q2 - low - medium vulnerability
+  -   Q3 - medium - high vulnerability
+  -   Q4 - highest vulnerability
+
+```{r}
+# Create an One-Way ANOVA model
+anova1a<- aov(CASE_FATALITY_RATE~SVI_QUARTILE, data=df_C19_svi)
+
+# View summary of one-way ANOVA model
+anova1a %>%
+  summary()
+
+# Perform Tukey post-hoc test
+anova1a %>%
+  TukeyHSD(ordered=T)
+```
+**Interpretation**
+
+*   A one-way ANOVA is used to determine whether or not there is a statistically significant difference between the means of three or more independent groups.
+*   From the above ANOVA results, it can be noticed that the overall F-statistic of the ANOVA mode is 52.59, calculated as $$F-statistic=Mean\ Square\ SVI\_QUARTILE/Mean\ square\ Residuals$$, which is   33.05 / 0.64 = 52.59. 
+*   The p-value associated with the F-statistic with numerator degrees of freedom df = 3 and denominator degrees of freedom df = 3,134, is <2e-16, which is an extremely small number. 
+*   <font color='brown'>**Since the p-value in the ANOVA table is less than .05, we have sufficient evidence to reject the null hypothesis. In other words, it can be inferred that there is a significant difference in the group mean of COVID-19 case-fatality rate among the SVI groups.**</font>
+
+*   Further, since each of the adjusted p-values is less than 0.05, we can conclude that there is a significant difference in the group mean of COVID-19 case-fatality rate among the SVI groups.
