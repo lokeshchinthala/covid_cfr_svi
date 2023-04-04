@@ -65,7 +65,6 @@ suppressMessages(library(ggpubr))
 options(dplyr.summarise.inform = FALSE)
 
 # Set current working directory
-#setwd('/Users/LChintha/HOPR861/Final_Project')
 ```
 
 
